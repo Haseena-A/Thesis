@@ -1,0 +1,1 @@
+lofreq call-parallel --no-default-filter --pp-threads 20 -f /data2/haseena/haseena/IP/GCF_000001405.26_GRCh38_genomic.fna /data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam/all_merge.bam -o /data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam/vcf/all_merged.vcf -S /home/haseena/00-common_all.vcf.gz

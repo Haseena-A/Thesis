@@ -1,0 +1,11 @@
+bam_files="/data1/haseena_IP/aligned_reads/Healthy/*.bam"
+
+for bam_file in $bam_files; do
+    srr_id=$(basename "$bam_file" | cut -d'_' -f1) # Adjust the delimiter as per your filename structure
+    samtools index "$bam_file"
+    lofreq call-parallel --no-default-filter --pp-threads 20 \
+        -f /data2/haseena/haseena/IP/GCF_000001405.26_GRCh38_genomic.fna \
+        "$bam_file" \
+        -o "/data1/haseena_IP/aligned_reads/Healthy/lofreq_${srr_id}.vcf" \
+        -S /data1/haseena_IP/aligned_reads/Healthy/merged_healthy.vcf
+done

@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# Define the output BAM file
+output_bam="/data1/haseena_IP/Breast_cancer_ctc/aligned_reads/CTC/new_CTC_final_merge.bam"
+
+# Use wildcard to find all matching BAM files
+input_bams=(/data1/haseena_IP/Breast_cancer_ctc/aligned_reads/CTC/SRR*_Aligned.sortedByCoord.out_selected_region.bam)
+
+# Print the BAM files being merged
+echo "Merging the following BAM files:"
+for bam in "${input_bams[@]}"; do
+    echo "$bam"
+done
+
+# Merge the BAM files
+samtools merge $output_bam "${input_bams[@]}"
+
+# Index the merged BAM file
+samtools index $output_bam
+
+echo "Merging completed. Output BAM file: $output_bam"

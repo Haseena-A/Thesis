@@ -1,0 +1,363 @@
+##IP code 
+
+1.code for file downloading
+      * nohup sh ena-file-download-read_run-PRJNA300264-fastq_ftp-20240530-0923.sh &
+      *fastq_down.sh
+#!/bin/bash
+
+# Path to the SRA Toolkit binaries
+#SRA_TOOLKIT_DIR="/scratch/vibhor/programmes/sratoolkit.2.8.2-1-centos_linux64"
+
+# Accession list file containing SRR IDs (one per line)
+ACCESSION_LIST="/data1/haseena_IP/Breast_cancer_tissue/cancer_tissue/SRR_Acc_List.txt"
+
+# Output directory to save downloaded files
+OUTPUT_DIR="/data1/haseena_IP/Breast_cancer_tissue/cancer_tissue/
+"
+
+# Loop through each SRR ID in the accession list
+while read -r SRR_ID
+do
+    # Download SRA file and convert to fastq format
+    prefetch $SRR_ID
+    fastq-dump --outdir $OUTPUT_DIR --split-3 --gzip $SRR_ID; done < "$ACCESSION_LIST"
+
+-------------------------------------------------------------------------------------------------------------------------------------
+
+2.star indexing
+    *star_indexing.sh
+mkdir /home/haseena/IP/
+
+STAR --runThreadN 8 \
+     --runMode genomeGenerate \
+     --genomeDir /home/haseena/IP/hg38_index \
+     --genomeFastaFiles /home/haseena/IP/GCF_000001405.26_GRCh38_genomic.fna \
+     --sjdbGTFfile /home/haseena/IP/GCF_000001405.39_GRCh38.p13_genomic.gtf \
+     --sjdbOverhang 100
+--------------------------------------------------------------------------------------------------------------------------------------------
+3.star mapping
+     *star_mapping.sh
+for fastq_file_1 in /home/haseena/IP/bc_tumor_ctc/*_1.fastq.gz; do
+    sample_name=$(basename $fastq_file_1 _1.fastq.gz)
+    fastq_file_2=/home/haseena/IP/bc_tumor_ctc/${sample_name}_2.fastq.gz
+
+    STAR --runThreadN 8 \
+         --genomeDir /data2/haseena/haseena/IP/hg38_index \
+         --readFilesIn $fastq_file_1 $fastq_file_2 \
+         --readFilesCommand zcat \
+         --outFileNamePrefix /data1/haseena_IP/Breast_cancer_ctc/aligned_reads/bam_tumor_ctc/${sample_name}_ \
+         --outSAMtype BAM SortedByCoordinate
+done
+
+for fastq_file in /home/haseena/IP/bc_tumor_ctc/*.fastq.gz; do
+    sample_name=$(basename $fastq_file .fastq.gz)
+
+    STAR --runThreadN 8 \
+         --genomeDir /data2/haseena/haseena/IP/hg38_index \
+         --readFilesIn $fastq_file \
+         --readFilesCommand zcat \
+         --outFileNamePrefix /data1/haseena_IP/Breast_cancer_ctc/aligned_reads/bam_tumor_ctc/${sample_name}_ \
+         --outSAMtype BAM SortedByCoordinate
+done
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+4.finding particular cancer hotspot(Top_50)
+     *select_breast_cancer_genes.r
+data_classi <- read.table("Cosmic_Classification_v99_GRCh38.tsv", sep = "\t", header = T)
+data_mut_genes <- read.csv("Cosmic_MutantCensus_v99_GRCh38.tsv", sep = "\t", header = T)
+
+unique(data_classi$PRIMARY_SITE)
+
+cos_id <- unique(data_classi[which(data_classi$PRIMARY_SITE %in% "pancreas"), "COSMIC_PHENOTYPE_ID"])
+
+genes_related <- data_mut_genes[which(data_mut_genes$COSMIC_PHENOTYPE_ID %in% cos_id) , "GENE_SYMBOL" ]
+
+table_freq_genes <- as.data.frame(table(genes_related))
+table_freq_genes_sort <- table_freq_genes[order(table_freq_genes$Freq, decreasing = T), ]
+
+genes_to_select <- table_freq_genes_sort[1:50, "genes_related"]
+
+write.csv(genes_to_select, "/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/all_work/genes_to_select_pancreas_cancer.txt", row.names = F)
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+5.To extract chr start end gene
+   *Code for extracting gene name, start and end co ordinate from gtf file
+
+
+awk '{print $1, $4, $5, $10}' /home/haseena/IP/main_files/GCF_000001405.39_GRCh38.p13_genomic.gtf > /home/haseena/IP/main_files/extracted_columnfrom_gtf_data.txt
+sed -E 's/^[[:space:]]+//; s/"//g; s/;//g' extracted_data.txt > cleaned_data.txt
+
+****
+awk 'BEGIN {OFS="\t"} {print $1, $4, $5, $10}' /home/haseena/IP/main_files/GCF_000001405.39_GRCh38.p13_genomic.gtf | sed -E 's/^[[:space:]]+//; s/"//g; s/;//g' > /data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/all_work/extracted_column_from_gtf_data.bed
+
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+6.To extract the top 50 gene from chr start end gene
+     *gene_coordinate_selection.py
+import pandas as pd
+
+# Define file paths
+gene_list_file = '/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/all_work/genes_to_select_pancreas_cancer.txt'
+bed_file = '/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/all_work/extracted_column_from_gtf_data.bed'
+filtered_bed_file = '/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/all_work/filtered_pan_genes_with_chr.bed'
+
+# Load the gene list from the text file
+with open(gene_list_file, 'r') as file:
+    gene_list = [line.strip().strip('"') for line in file]
+
+# Load the BED file into a DataFrame
+bed_df = pd.read_csv(bed_file, sep='\t', header=None)
+
+# Filter the DataFrame based on the gene list
+filtered_df = bed_df[bed_df[3].astype(str).isin(gene_list)]  # Ensure gene_list is string type for comparison
+
+# Save the filtered DataFrame to a new BED file
+filtered_df.to_csv(filtered_bed_file, sep='\t', header=False, index=False, float_format='%.0f')
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+7.To take min and max
+    *min_max.py
+import pandas as pd
+
+# Define the file path
+input_file_path = '/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/all_work/filtered_pan_genes_with_chr.bed'
+output_file_path = '/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/all_work/processed_pan_genes_with_chr.bed'
+
+# Read the data from the file
+df = pd.read_csv(input_file_path, sep="\t", header=None, names=['chr', 'start', 'end', 'name'])
+
+# Group by the 4th column and find min and max of the 2nd and 3rd columns
+result = df.groupby('name').agg({'chr': 'first', 'start': 'min', 'end': 'max'}).reset_index()
+
+# Reorder columns to match BED format
+result = result[['chr', 'start', 'end', 'name']]
+
+# Save the result to a new file in BED format
+result.to_csv(output_file_path, sep='\t', header=False, index=False)
+
+print(f"Processed file saved to {output_file_path}")
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+8.To verify min and max done properly
+       *verify.py
+def count_words_in_bed_file(bed_file_path, words_to_count):
+    word_counts = {word: 0 for word in words_to_count}
+    with open(bed_file_path, 'r') as bed_file:
+        for line in bed_file:
+            for word in words_to_count:
+                if word in line:
+                    word_counts[word] += 1
+    return word_counts
+
+def save_word_counts_to_txt(word_counts, output_file):
+    with open(output_file, 'w') as txt_file:
+        for word, count in word_counts.items():
+            txt_file.write(f"{word}: {count}\n")
+
+bed_file_path = '/home/haseena/IP/main_files/gene_start_end_from_GTF.bed'
+output_file = '/home/haseena/IP/main_files/count.txt'
+words_to_count = [
+    "PIK3CA", "TP53", "CNTNAP2", "CSMD3", "PTPRD", "LRP1B", "GPC5", "ROBO2",
+    "CTNNA2", "DCC", "CDH1", "ESR1", "ZFHX3", "PTPRT", "ERBB4", "KMT2C", "RGS7",
+    "GATA3", "MED12", "MAP3K1", "FHIT", "ALK", "CTNND2", "CNBD1", "PTEN", "FAT3",
+    "CAMTA1", "FAM135B", "NF1", "GRIN2A", "AFF3", "ERBB2", "ARID1A", "LPP", "AKT1",
+    "PRKCB", "RUNX1", "PREX2", "NBEA", "NCOR1", "BRCA2", "SNX29", "ARID1B", "EPHA3",
+    "AKT3", "FOXP1", "ATRX", "NTRK3", "EBF1", "RAD51B"
+]
+
+word_counts = count_words_in_bed_file(bed_file_path, words_to_count)
+save_word_counts_to_txt(word_counts, output_file)
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+9.To remove last column gene_column
+       *last_column.py
+input_file = '/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/all_work/processed_pan_genes_with_chr.bed'
+output_file = '/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/all_work/processed_genes_without_last_column.bed'
+
+try:
+    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
+        for line in infile:
+            # Split the line by tab and take the first three columns
+            columns = line.strip().split()
+            if len(columns) >= 3:
+                new_line = '\t'.join(columns[:3]) + '\n'
+                # Write the new line to the output file
+                outfile.write(new_line)
+            else:
+                print(f"Skipping line due to insufficient columns: {line}")
+    print("Processed BED file saved successfully.")
+except Exception as e:
+    print(f"An error occurred: {e}")
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+10.To extract particular gene coordinate from bam (chr start end or NC_00 start end)depend on bam 
+       *bedtools_filter.sh
+# Define the directory paths
+input_dir="/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM"
+output_dir="/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam"
+bed_file="/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/all_work/processed_genes_without_last_column.bed"
+
+# Loop through each BAM file in the input directory
+for bam_file in "$input_dir"/*.bam; do
+    # Extract the SRR ID from the BAM file name
+    srr_id=$(basename "$bam_file" | cut -d'_' -f1)
+    
+    # Define the output BAM file name
+    output_file="$output_dir/${srr_id}_filtered.bam"
+    
+    # Run bedtools intersect
+    bedtools intersect -abam "$bam_file" -b "$bed_file" > "$output_file"
+    
+    echo "Processed $bam_file and saved filtered output to $output_file"
+done
+
+echo "All BAM files processed successfully."
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+11. merge bam  file (healthy mean only filtered healthy bam)
+       *samtools merge all_merge.bam *_filtered.bam
+       *code_for_merge_bam.sh
+#!/bin/bash
+
+# Define the output BAM file
+output_bam="/data1/haseena_IP/Breast_cancer_ctc/aligned_reads/CTC/new_CTC_final_merge.bam"
+
+# Use wildcard to find all matching BAM files
+input_bams=(/data1/haseena_IP/Breast_cancer_ctc/aligned_reads/CTC/SRR*_Aligned.sortedByCoord.out_selected_region.bam)
+
+# Print the BAM files being merged
+echo "Merging the following BAM files:"
+for bam in "${input_bams[@]}"; do
+    echo "$bam"
+done
+
+# Merge the BAM files
+samtools merge $output_bam "${input_bams[@]}"
+
+# Index the merged BAM file
+samtools index $output_bam
+
+echo "Merging completed. Output BAM file: $output_bam"
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+12.Run the lofreq in merged bam
+       *samtools index /data1/haseena_IP/Breast_cancer_ctc/processed_ctc_ctc/CTC_merged.bam
+samtools index /data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam/all_merge.bam
+
+       *lofreq.sh
+lofreq call-parallel --no-default-filter --pp-threads 20 -f /data2/haseena/haseena/IP/GCF_000001405.26_GRCh38_genomic.fna /data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam/all_merge.bam -o all_merged.vcf -S /home/haseena/00-common_all.vcf.gz
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+13.Merging merged.vcf + common_all.vcf.gz
+       *
+bgzip -@20 /data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam/vcf/all_merged.vcf
+tabix -p vcf /data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam/vcf/all_merged.vcf.gz
+/home/haseena/bcftools-1.17/bcftools merge /home/haseena/00-common_all.vcf.gz /data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam/vcf/all_merged.vcf.gz -o /data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam/vcf/final_spatial.vcf
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+14.Running lofreq on individual cell
+bam_files="/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam/*_filtered.bam"
+
+for bam_file in $bam_files; do
+    srr_id=$(basename "$bam_file" | cut -d'_' -f1) # Adjust the delimiter as per your filename structure
+    samtools index "$bam_file"
+    lofreq call-parallel --no-default-filter --pp-threads 20 \
+        -f /data2/haseena/haseena/IP/GCF_000001405.26_GRCh38_genomic.fna \
+        "$bam_file" \
+        -o "/data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/lofreq/lofreq_${srr_id}.vcf" \
+        -S  /data1/haseena_IP/tsv_files/sandisk/sandisk_output3/BAM/filtered_bam/vcf/final_spatial.vcf
+done
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+15.Annovar
+perl /home/haseena/annovar/table_annovar.pl /data1/haseena_IP/pan/pan_all_three_merged/final_all_reference_pan.vcf \
+/home/haseena/annovar/humandb/ -buildver hg38 -out /data1/haseena_IP/pan/pan_all_three_merged/final_all_reference_pan \
+-protocol refGene -operation g -nastring . -vcfinput --thread 30 --maxgenethread 30 -polish -remove
+
+
+**
+#!/bin/bash
+
+# Set the input directory containing VCF files
+input_dir="/data1/haseena_IP/pan/pan_all_three_merged/"
+# Set the output directory
+output_dir="/data1/haseena_IP/pan/pan_all_three_merged/"
+# Set the Annovar database directory
+annovar_db="/home/haseena/annovar/humandb/"
+# Set the build version
+build_ver="hg38"
+
+# Loop through each VCF file in the input directory
+for vcf_file in ${input_dir}*.vcf; do
+    # Extract the base name of the file (without directory and extension)
+    base_name=$(basename "$vcf_file" .vcf)
+    
+    # Run table_annovar.pl for each VCF file
+    perl /home/haseena/annovar/table_annovar.pl "$vcf_file" \
+    "$annovar_db" -buildver "$build_ver" -out "${output_dir}${base_name}" \
+    -protocol refGene -operation g -nastring . -vcfinput --thread 30 --maxgenethread 30 -polish -remove
+done
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+16.analyze lofreq
+  *run analyze_lofreq.sh
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+#!/bin/bash
+
+# Define directories and files
+bam_files="/data1/haseena_IP/pan/pan_ctc/SRR*_pan_ctc_filtered.bam"
+output_dir="/data1/haseena_IP/pan/pan_ctc/"
+reference_fasta="/data2/haseena/haseena/IP/GCF_000001405.26_GRCh38_genomic.fna"
+final_reference_vcf="/data1/haseena_IP/pan/pan_all_three_merged/final_all_reference_pan.vcf"
+
+# List existing VCF files
+existing_vcf_files=($(ls $output_dir/lofreq_*.vcf 2>/dev/null | xargs -n 1 basename))
+
+# Loop through BAM files
+for bam_file in $bam_files; do
+    srr_id=$(basename "$bam_file" | cut -d'_' -f1) # Adjust the delimiter as per your filename structure
+    vcf_file="lofreq_${srr_id}.vcf"
+
+    # Check if the VCF file already exists
+    if [[ " ${existing_vcf_files[@]} " =~ " ${vcf_file} " ]]; then
+        echo "VCF file $vcf_file already exists. Skipping conversion for $bam_file."
+    else
+        echo "VCF file $vcf_file not found. Converting $bam_file to VCF."
+        samtools index "$bam_file"
+        lofreq call-parallel --no-default-filter --pp-threads 20 \
+            -f "$reference_fasta" \
+            "$bam_file" \
+            -o "$output_dir/$vcf_file" \
+            -S "$final_reference_vcf"
+    fi
+done
+--------------------------
+NEW COMMAND for annvar analysis
+setwd("/data1/haseena_IP/PRJNA431985_Breast_cancer/xenograft_ctc/")
+file_list <- list.files(pattern = "*.hg38_multianno.txt") # path to the individual annovar output
+genes_selected <- read.csv("/data1/haseena_IP/PRJNA431985_Breast_cancer/breast_cancer_hotspot_gene.csv")
+
+data_merge_pat1 <- read.table("/data1/haseena_IP/PRJNA431985_Breast_cancer/xenograft_ctc/ref1/All_xeno_merged_converted_bam.hg38_multianno.txt", header = TRUE, sep = "\t") # merged annovar output normal
+
+mat_data_pat <- matrix(NA, 0, 10)
+colnames(mat_data_pat) <- c("Chr", "Start", "Ref", "Alt", "Func.refGene", "Gene.refGene", "GeneDetail.refGene", "AAChange.refGene", "Otherinfo11", "cell_id")
+
+for (i in 1:length(file_list)) {
+  file_path <- paste0("/data1/haseena_IP/PRJNA431985_Breast_cancer/xenograft_ctc/", file_list[i])
+  
+  # Check if file is not empty
+  if (file.info(file_path)$size == 0) {
+    next
+  }
+  
+  data_pre <- read.table(file_path, header = TRUE, sep = "\t")
+  data_pre1 <- data_pre[which(data_pre$Gene.refGene %in% genes_selected$Gene),]
+  if (nrow(data_pre1) == 0) {
+    next
+  }
+  data <- data_pre1[, c("Chr", "Start", "Ref", "Alt", "Func.refGene", "Gene.refGene", "GeneDetail.refGene", "AAChange.refGene", "Otherinfo11")]
+  name_pre <- gsub("lofreq_", "", file_list[i])
+  data$cell_id <- gsub(".hg38_multianno.txt", "", name_pre)
+  mat_data_pat <- rbind(mat_data_pat, data)
+}
+
+mat_data_pat <- as.data.frame(mat_data_pat)  # Convert matrix to data frame
+mat_data_pat$Chr_Start <- paste0(mat_data_pat$Chr, "_", mat_data_pat$Start)
+

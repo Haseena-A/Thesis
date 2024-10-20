@@ -1,0 +1,6 @@
+/home/haseena/htslib-1.17/bgzip -@20 /data1/haseena_IP/aligned_reads/CTC/lofreq_ctc.vcf
+
+/home/haseena/htslib-1.17/tabix -p vcf /data1/haseena_IP/aligned_reads/CTC/lofreq_ctc.vcf.gz
+
+/home/haseena/bcftools-1.17/bcftools merge /home/haseena/00-common_all.vcf.gz /data1/haseena_IP/aligned_reads/CTC/lofreq_ctc.vcf.gz -o /data1/haseena_IP/aligned_reads/CTC/merged_ctc.vcf
+
